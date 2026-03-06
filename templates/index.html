@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}Importer une recette Cookomix vers Cookidoo{% endblock %}
+
+{% block content %}
+<div class="container">
+    <header>
+        <h1>🍳 Cookomix → Cookidoo</h1>
+        <p>Importez facilement vos recettes Cookomix sur votre Cookidoo</p>
+    </header>
+    
+    <main>
+        <form id="recipeForm">
+            <div class="form-group">
+                <label for="url">URL de la recette Cookomix:</label>
+                <input 
+                    type="url" 
+                    id="url" 
+                    name="url" 
+                    placeholder="https://www.cookomix.com/recettes/..."
+                    required
+                >
+            </div>
+            
+            <div class="button-group">
+                <button type="button" class="btn-primary" id="importBtn" onclick="importRecipe()">
+                    📤 Importer directement
+                </button>
+            </div>
+        </form>
+        
+        <div id="message" style="display: none;"></div>
+        
+        <div id="progressContainer" style="display: none; margin-top: 30px;">
+            <div style="background: #f0f0f0; border-radius: 6px; padding: 20px;">
+                <p style="margin-bottom: 10px; color: #333; font-weight: 600;">Importation en cours...</p>
+                <div style="width: 100%; height: 8px; background: #ddd; border-radius: 4px; overflow: hidden;">
+                    <div id="progressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.3s;"></div>
+                </div>
+                <p id="progressText" style="margin-top: 10px; text-align: center; color: #666; font-size: 0.9em;">
+                    Scraping de la recette...
+                </p>
+            </div>
+        </div>
+        
+        <div id="resultContainer" style="display: none; margin-top: 30px;">
+            <div style="background: #efe; border-left: 4px solid #6f6; padding: 20px; border-radius: 6px; color: #3c3;">
+                <h2 style="margin-bottom: 10px; color: #3c3;">✅ Succès!</h2>
+                <p id="resultText"></p>
+                <a id="recipeLink" href="#" target="_blank" style="display: inline-block; margin-top: 15px; color: #667eea; text-decoration: none; font-weight: bold; padding: 10px 15px; background: white; border-radius: 4px;">
+                    🔗 Voir la recette sur Cookidoo
+                </a>
+            </div>
+            
+            <div class="button-group" style="margin-top: 30px;">
+                <button type="button" class="btn-secondary" onclick="resetForm()">
+                    ↺ Importer une autre recette
+                </button>
+            </div>
+        </div>
+    </main>
+    
+    <footer>
+        <p>Créé avec ❤️ pour automatiser vos recettes Thermomix</p>
+    </footer>
+</div>
+
+<script>
+async function importRecipe() {
+    const url = document.getElementById('url').value;
+    
+    if (!url.trim()) {
+        showMessage('Veuillez entrer une URL valide', 'error');
+        return;
+    }
+    
+    // Afficher la barre de progression
+    document.getElementById('progressContainer').style.display = 'block';
+    document.getElementById('message').style.display = 'none';
+    document.getElementById('resultContainer').style.display = 'none';
+    document.getElementById('importBtn').disabled = true;
+    
+    try {
+        // Simuler une progression
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            if (progress < 90) {
+                progress += Math.random() * 40;
+                updateProgress(Math.min(progress, 90));
+            }
+        }, 500);
+        
+        const response = await fetch('/import-direct', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url: url })
+        });
+        
+        clearInterval(progressInterval);
+        updateProgress(100);
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            showMessage(data.error || 'Erreur lors de l\'import', 'error');
+            document.getElementById('importBtn').disabled = false;
+            document.getElementById('progressContainer').style.display = 'none';
+            return;
+        }
+        
+        // Succès!
+        document.getElementById('progressContainer').style.display = 'none';
+        document.getElementById('resultText').textContent = 
+            `La recette "${data.recipe_name}" a été importée avec succès!`;
+        document.getElementById('recipeLink').href = data.recipe_url;
+        document.getElementById('resultContainer').style.display = 'block';
+        
+    } catch (error) {
+        showMessage('Erreur: ' + error.message, 'error');
+        document.getElementById('progressContainer').style.display = 'none';
+    } finally {
+        document.getElementById('importBtn').disabled = false;
+    }
+}
+
+function updateProgress(percent) {
+    document.getElementById('progressBar').style.width = percent + '%';
+    
+    const stages = [
+        'Scraping de la recette...',
+        'Détection des annotations...',
+        'Connexion à Cookidoo...',
+        'Création de la recette...',
+        'Finalisation...'
+    ];
+    
+    const stageIndex = Math.floor((percent / 100) * stages.length);
+    if (stageIndex < stages.length) {
+        document.getElementById('progressText').textContent = stages[stageIndex];
+    }
+}
+
+function showMessage(text, type) {
+    const msgDiv = document.getElementById('message');
+    msgDiv.innerHTML = `<div class="alert alert-${type}">${escapeHtml(text)}</div>`;
+    msgDiv.style.display = 'block';
+}
+
+function resetForm() {
+    document.getElementById('recipeForm').reset();
+    document.getElementById('progressContainer').style.display = 'none';
+    document.getElementById('message').style.display = 'none';
+    document.getElementById('resultContainer').style.display = 'none';
+    document.getElementById('importBtn').disabled = false;
+    document.getElementById('url').focus();
+}
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// Focus sur l'input au chargement
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('url').focus();
+});
+</script>
+{% endblock %}

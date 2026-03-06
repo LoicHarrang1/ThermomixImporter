@@ -1,0 +1,10 @@
+# Fichier d'exemple pour batch_import.py
+# Une URL par ligne, commentaires avec #
+
+# Recettes de base
+https://www.cookomix.com/recettes/pate-a-pizza-thermomix/
+https://www.cookomix.com/recettes/pate-brisee-thermomix/
+
+# Plats principaux
+https://www.cookomix.com/recettes/manouche-thermomix/
+https://www.cookomix.com/recettes/risotto-thermomix/
