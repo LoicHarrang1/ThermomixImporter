@@ -10,10 +10,11 @@ import json
 class TTSAnnotation:
     """Génère des annotations TTS (Thermomix Time Settings) pour Cookidoo"""
     
-    # Pattern pour détecter les paramètres Thermomix
+    # Pattern pour détecter les paramètres Thermomix (SANS vitesses spéciales qui sont des modes)
     # Détecte: "X min/Y°C/vitesse Z" ou "X sec/vitesse Z" ou "X min/Varoma/vitesse Z" etc
+    # Mais EXCLUT vitesse pétrin/turbo/mixage/rechauffage/rice cooker
     THERMOMIX_PATTERN = re.compile(
-        r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(\d+(?:\.\d+)?|pétrin|turbo))?',
+        r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(\d+(?:\.\d+)?))?',
         re.IGNORECASE
     )
     
@@ -185,20 +186,94 @@ class ModeAnnotation:
     """Génère des annotations MODE pour les modes de cuisson Thermomix"""
     
     # Patterns pour détecter les modes de cuisson
-    # Format: "Mode /durée" ou "Mode durée" ou "Mode /°C"
+    # Ces patterns détectent les vitesses spéciales (pétrin, turbo, etc.) dans les TTS
+    # Format: "X min/vitesse pétrin" ou "X sec/vitesse turbo" etc
+    PETRIN_MODE_FROM_TTS = re.compile(r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(pétrin|petrin))\b', re.IGNORECASE)
+    TURBO_MODE_FROM_TTS = re.compile(r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(turbo))\b', re.IGNORECASE)
+    MIXAGE_MODE_FROM_TTS = re.compile(r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(mixage))\b', re.IGNORECASE)
+    RECHAUFFAGE_MODE_FROM_TTS = re.compile(r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(rechauffage|réchauffage))\b', re.IGNORECASE)
+    RICE_COOKER_MODE_FROM_TTS = re.compile(r'(?:(?:(\d+)\s*min(?:\s*(?:et)?\s*(\d+)\s*(?:sec|s))?)|(?:(\d+)\s*(?:sec|s)))(?:\s*/\s*(?:(\d+)°?[CcFf]|(Varoma|Vapor)))?(?:\s*/\s*vitesse\s*(rice\s*cooker))\b', re.IGNORECASE)
+    
+    # Patterns pour détecter les modes simples (comme dans les payloads de Cookidoo)
+    # Format: "Pétrin /5 min" ou "Réchauffer 65°C"
     PETRIN_MODE = re.compile(r'\bpétrin\s*/?(?:\s*)(\d+)\s*(min|minutes|sec|secondes|s)\b', re.IGNORECASE)
     TURBO_MODE = re.compile(r'\bturbo\s*/?(?:\s*)(\d+)\s*(min|minutes|sec|secondes|s)\b', re.IGNORECASE)
     MIXAGE_MODE = re.compile(r'\bmixage\s*/?(?:\s*)(\d+)\s*(min|minutes|sec|secondes|s)\b', re.IGNORECASE)
-    RECHAUFFER_MODE = re.compile(r'\bréchauffer\s*/?(?:\s*)(\d+)°?c?\b', re.IGNORECASE)
+    RECHAUFFER_MODE = re.compile(r'\brechauffage\s*/?(?:\s*)(\d+)°?c?|\bréchauffer\s*/?(?:\s*)(\d+)°?c?\b', re.IGNORECASE)
     RICE_COOKER_MODE = re.compile(r'\brice\s+cooker\s*/?(?:\s*)(\d+)\s*(min|minutes|sec|secondes|s)\b', re.IGNORECASE)
     
     MODE_MAPPING = {
-        'petrin': ('dough', 'soft', None),      # (name, speed, temperature)
+        'petrin': ('dough', 'soft', None),
         'turbo': ('turbo', '2', None),
         'mixage': ('mixing', '1', None),
-        'rechauffer': ('warm_up', '1', 'temperature'),  # special: temperature is provided
+        'rechauffage': ('warm_up', '1', 'temperature'),
+        'rechauffer': ('warm_up', '1', 'temperature'),  # alias
         'rice_cooker': ('rice_cooker', '1', None),
     }
+    
+    @staticmethod
+    def extract_mode_from_tts(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Extrait un mode de cuisson depuis une instruction TTS
+        (ex: "Mélanger 1 min/vitesse pétrin")
+        
+        Args:
+            text: Texte contenant des paramètres avec vitesse spéciale
+        
+        Returns:
+            Dict avec {mode_type, time, temperature} ou None
+        """
+        # Chercher Pétrin
+        match = ModeAnnotation.PETRIN_MODE_FROM_TTS.search(text)
+        if match:
+            minutes = int(match.group(1)) if match.group(1) else 0
+            seconds_after_min = int(match.group(2)) if match.group(2) else 0
+            seconds_only = int(match.group(3)) if match.group(3) else 0
+            total_seconds = (minutes * 60) + seconds_after_min + seconds_only
+            temperature = int(match.group(4)) if match.group(4) else None
+            return {"type": "petrin", "time": total_seconds, "temperature": temperature}
+        
+        # Chercher Turbo
+        match = ModeAnnotation.TURBO_MODE_FROM_TTS.search(text)
+        if match:
+            minutes = int(match.group(1)) if match.group(1) else 0
+            seconds_after_min = int(match.group(2)) if match.group(2) else 0
+            seconds_only = int(match.group(3)) if match.group(3) else 0
+            total_seconds = (minutes * 60) + seconds_after_min + seconds_only
+            temperature = int(match.group(4)) if match.group(4) else None
+            return {"type": "turbo", "time": total_seconds, "temperature": temperature}
+        
+        # Chercher Mixage
+        match = ModeAnnotation.MIXAGE_MODE_FROM_TTS.search(text)
+        if match:
+            minutes = int(match.group(1)) if match.group(1) else 0
+            seconds_after_min = int(match.group(2)) if match.group(2) else 0
+            seconds_only = int(match.group(3)) if match.group(3) else 0
+            total_seconds = (minutes * 60) + seconds_after_min + seconds_only
+            temperature = int(match.group(4)) if match.group(4) else None
+            return {"type": "mixage", "time": total_seconds, "temperature": temperature}
+        
+        # Chercher Rechauffage
+        match = ModeAnnotation.RECHAUFFAGE_MODE_FROM_TTS.search(text)
+        if match:
+            minutes = int(match.group(1)) if match.group(1) else 0
+            seconds_after_min = int(match.group(2)) if match.group(2) else 0
+            seconds_only = int(match.group(3)) if match.group(3) else 0
+            total_seconds = (minutes * 60) + seconds_after_min + seconds_only
+            temperature = int(match.group(4)) if match.group(4) else None
+            return {"type": "rechauffage", "time": total_seconds, "temperature": temperature}
+        
+        # Chercher Rice Cooker
+        match = ModeAnnotation.RICE_COOKER_MODE_FROM_TTS.search(text)
+        if match:
+            minutes = int(match.group(1)) if match.group(1) else 0
+            seconds_after_min = int(match.group(2)) if match.group(2) else 0
+            seconds_only = int(match.group(3)) if match.group(3) else 0
+            total_seconds = (minutes * 60) + seconds_after_min + seconds_only
+            temperature = int(match.group(4)) if match.group(4) else None
+            return {"type": "rice_cooker", "time": total_seconds, "temperature": temperature}
+        
+        return None
     
     @staticmethod
     def extract_mode(text: str) -> Optional[Dict[str, Any]]:
@@ -211,7 +286,12 @@ class ModeAnnotation:
         Returns:
             Dict avec {mode_type, time, temperature} ou None
         """
-        # Chercher Pétrin
+        # D'abord essayer de trouver un mode depuis une TTS (vitesse spéciale)
+        mode_data = ModeAnnotation.extract_mode_from_tts(text)
+        if mode_data:
+            return mode_data
+        
+        # Chercher Pétrin simple
         match = ModeAnnotation.PETRIN_MODE.search(text)
         if match:
             duration = int(match.group(1))
@@ -219,7 +299,7 @@ class ModeAnnotation:
             time_seconds = duration * 60 if unit in ['min', 'minutes'] else duration
             return {"type": "petrin", "time": time_seconds, "temperature": None}
         
-        # Chercher Turbo
+        # Chercher Turbo simple
         match = ModeAnnotation.TURBO_MODE.search(text)
         if match:
             duration = int(match.group(1))
@@ -227,7 +307,7 @@ class ModeAnnotation:
             time_seconds = duration * 60 if unit in ['min', 'minutes'] else duration
             return {"type": "turbo", "time": time_seconds, "temperature": None}
         
-        # Chercher Mixage
+        # Chercher Mixage simple
         match = ModeAnnotation.MIXAGE_MODE.search(text)
         if match:
             duration = int(match.group(1))
@@ -235,13 +315,14 @@ class ModeAnnotation:
             time_seconds = duration * 60 if unit in ['min', 'minutes'] else duration
             return {"type": "mixage", "time": time_seconds, "temperature": None}
         
-        # Chercher Réchauffer
+        # Chercher Réchauffage simple
         match = ModeAnnotation.RECHAUFFER_MODE.search(text)
         if match:
-            temperature = int(match.group(1))
-            return {"type": "rechauffer", "time": None, "temperature": temperature}
+            temperature = int(match.group(1)) if match.group(1) else int(match.group(2)) if match.group(2) else None
+            if temperature:
+                return {"type": "rechauffage", "time": None, "temperature": temperature}
         
-        # Chercher Rice Cooker
+        # Chercher Rice Cooker simple
         match = ModeAnnotation.RICE_COOKER_MODE.search(text)
         if match:
             duration = int(match.group(1))
@@ -251,6 +332,7 @@ class ModeAnnotation:
         
         return None
     
+    @staticmethod
     @staticmethod
     def find_position_in_text(text: str, mode_data: Dict[str, Any]) -> Optional[Tuple[int, int]]:
         """
@@ -263,6 +345,21 @@ class ModeAnnotation:
         Returns:
             Tuple (offset, length) ou None
         """
+        # Chercher patterns depuis TTS d'abord (plus spécifiques)
+        patterns_from_tts = [
+            ModeAnnotation.PETRIN_MODE_FROM_TTS,
+            ModeAnnotation.TURBO_MODE_FROM_TTS,
+            ModeAnnotation.MIXAGE_MODE_FROM_TTS,
+            ModeAnnotation.RECHAUFFAGE_MODE_FROM_TTS,
+            ModeAnnotation.RICE_COOKER_MODE_FROM_TTS
+        ]
+        
+        for pattern in patterns_from_tts:
+            match = pattern.search(text)
+            if match:
+                return (match.start(), match.end() - match.start())
+        
+        # Chercher patterns simples
         patterns = [
             ModeAnnotation.PETRIN_MODE,
             ModeAnnotation.TURBO_MODE,
