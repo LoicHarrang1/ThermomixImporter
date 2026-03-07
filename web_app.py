@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scrape_cookomix import scrape_recipe, RecipeData
 from cookidoo_service import CookidooService, load_cookidoo_credentials
 from thermomix_formatter import enhance_instructions
-from tts_annotations import StepWithTTS, IngredientAnnotation
+from tts_annotations import StepWithTTS, IngredientAnnotation, ModeAnnotation
 import html
 
 app = Flask(__name__)

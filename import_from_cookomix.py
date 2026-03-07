@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scrape_cookomix import scrape_recipe, RecipeData
 from cookidoo_service import CookidooService, load_cookidoo_credentials
 from thermomix_formatter import enhance_instructions, is_thermomix_instruction
-from tts_annotations import StepWithTTS, IngredientAnnotation
+from tts_annotations import StepWithTTS, IngredientAnnotation, ModeAnnotation
 
 
 def clean_html_entities(text: str) -> str:
@@ -188,8 +188,10 @@ async def upload_to_cookidoo(recipe_data: dict) -> tuple[str, str]:
         
         # Compter les étapes avec annotations
         tts_count = sum(1 for step in steps_with_tts if any(a.get('type') == 'TTS' for a in step.annotations))
+        mode_count = sum(1 for step in steps_with_tts if any(a.get('type') == 'MODE' for a in step.annotations))
         ingredient_count = sum(1 for step in steps_with_tts if any(a.get('type') == 'INGREDIENT' for a in step.annotations))
         print(f"   ✅ {tts_count} étapes avec paramètres Thermomix")
+        print(f"   ✅ {mode_count} étapes avec modes de cuisson")
         print(f"   ✅ {ingredient_count} étapes avec ingrédients détectés")
         
         # Créer la recette AVEC annotations TTS
